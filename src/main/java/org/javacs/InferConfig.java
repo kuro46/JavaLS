@@ -9,7 +9,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 class InferConfig {
     private static final Logger LOG = Logger.getLogger("main");
@@ -75,6 +77,13 @@ class InferConfig {
             return bazelClasspath(bazelWorkspaceRoot);
         }
 
+        // Gradle
+        var buildGradle = workspaceRoot.resolve("build.gradle");
+        var buildGradleKts = workspaceRoot.resolve("build.gradle.kts");
+        if (Files.exists(buildGradle) || Files.exists(buildGradleKts)) {
+            return gradleDependencies(false);
+        }
+
         return Collections.emptySet();
     }
 
@@ -116,7 +125,37 @@ class InferConfig {
             return bazelSourcepath(bazelWorkspaceRoot);
         }
 
+        // Gradle
+        var buildGradle = workspaceRoot.resolve("build.gradle");
+        var buildGradleKts = workspaceRoot.resolve("build.gradle.kts");
+        if (Files.exists(buildGradle) || Files.exists(buildGradleKts)) {
+            return gradleDependencies(true);
+        }
+
         return Collections.emptySet();
+    }
+
+    private static final Pattern GRADLE_DEPENDENCY_PATTERN = Pattern.compile("--- ([^ ]" +
+            "+?):([^ ]+?):([^ ]" +
+            "+?)(:? \\(\\*\\))?$");
+
+    private Set<Path> gradleDependencies(boolean source) {
+        try {
+            var output = Files.createTempFile("java-language-server-output", ".txt");
+            new ProcessBuilder("./gradlew", "dependencies", "--configuration", "compileClasspath")
+                    .directory(workspaceRoot.toFile())
+                    .redirectOutput(output.toFile())
+                    .start()
+                    .waitFor();
+            return Files.lines(output)
+                    .map(GRADLE_DEPENDENCY_PATTERN::matcher)
+                    .filter(Matcher::find)
+                    .map(matcher -> new Artifact(matcher.group(1), matcher.group(2), matcher.group(3)))
+                    .map(artifact -> findGradleJar(artifact, source))
+                    .collect(Collectors.toSet());
+        } catch (InterruptedException | IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private Path findAnyJar(Artifact artifact, boolean source) {
