@@ -135,24 +135,27 @@ class InferConfig {
         return Collections.emptySet();
     }
 
-    private static final Pattern GRADLE_DEPENDENCY_PATTERN = Pattern.compile("--- ([^ ]" +
-            "+?):([^ ]+?):([^ ]" +
-            "+?)(:? \\(\\*\\))?$");
+    private static final Pattern GRADLE_DEPENDENCY_PATTERN =
+        Pattern.compile("--- ([^ ]+?):([^ ]+?):([^ ]+?)(:? \\(\\*\\))?$");
 
     private Set<Path> gradleDependencies(boolean source) {
         try {
-            var output = Files.createTempFile("java-language-server-output", ".txt");
-            new ProcessBuilder("./gradlew", "dependencies", "--configuration", "compileClasspath")
-                    .directory(workspaceRoot.toFile())
-                    .redirectOutput(output.toFile())
-                    .start()
-                    .waitFor();
-            return Files.lines(output)
-                    .map(GRADLE_DEPENDENCY_PATTERN::matcher)
-                    .filter(Matcher::find)
-                    .map(matcher -> new Artifact(matcher.group(1), matcher.group(2), matcher.group(3)))
-                    .map(artifact -> findGradleJar(artifact, source))
-                    .collect(Collectors.toSet());
+            Set<Path> paths = new HashSet<>();
+            for (String scope : List.of("compileClasspath", "testCompileClasspath")) {
+                var output = Files.createTempFile("java-language-server-output", ".txt");
+                new ProcessBuilder("./gradlew", "dependencies", "--configuration", scope)
+                        .directory(workspaceRoot.toFile())
+                        .redirectOutput(output.toFile())
+                        .start()
+                        .waitFor();
+                Files.lines(output)
+                        .map(GRADLE_DEPENDENCY_PATTERN::matcher)
+                        .filter(Matcher::find)
+                        .map(matcher -> new Artifact(matcher.group(1), matcher.group(2), matcher.group(3)))
+                        .map(artifact -> findGradleJar(artifact, source))
+                        .forEach(paths::add);
+            }
+            return paths;
         } catch (InterruptedException | IOException e) {
             throw new RuntimeException(e);
         }
