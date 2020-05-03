@@ -3,6 +3,7 @@ package org.javacs;
 import com.google.devtools.build.lib.analysis.AnalysisProtos;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -202,9 +203,21 @@ class InferConfig {
         var match = FileSystems.getDefault().getPathMatcher(pattern);
 
         try {
-            return Files.walk(base, 7).filter(match::matches).findFirst().orElse(NOT_FOUND);
+            return Files.walk(base, 7)
+                .filter(match::matches)
+                .sorted(Comparator.comparing(p -> {
+                    try {
+                        return Files.getLastModifiedTime(p);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                }, Comparator.reverseOrder()))
+                .findFirst()
+                .orElse(NOT_FOUND);
         } catch (IOException e) {
             throw new RuntimeException(e);
+        } catch (UncheckedIOException e) {
+            throw new RuntimeException(e.getCause());
         }
     }
 
